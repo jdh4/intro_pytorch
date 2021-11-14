@@ -1,0 +1,214 @@
+#!/usr/bin/python3
+
+# check for scatter
+
+import sys
+import os
+import argparse
+import subprocess
+from subprocess import PIPE
+from socket import gethostname
+from blessed import Terminal
+
+psr = argparse.ArgumentParser()
+psr.add_argument('-d', type=int, action='store', dest='days', default=30,
+    help='Number of days')
+psr.add_argument('-u', type=str, action='store', dest='netid',
+    default=os.environ["USER"], help='NetID of the user')
+psr.add_argument('-f', action='store_true', help='Flag to print single line')
+args = psr.parse_args()
+
+if not args.netid:
+  print("Enter netid using -u option. Exiting ...")
+  sys.exit(0)
+
+def start_date(days_back):
+  from datetime import datetime, timedelta
+  d = datetime.today() - timedelta(days=days_back)
+  return d.strftime("%Y-%m-%d")
+
+s = start_date(args.days)
+fmt = ("jobid%25,state%50,nnodes%6,ncpus%5,cputimeraw%25,elapsedraw%50,"
+       "timelimitraw%50,partition%25,alloctres%75,workdir%50")
+cmd = f"sacct -X -P -n -S {s} -u {args.netid} -o {fmt}"
+try:
+  output = subprocess.run(cmd, shell=True, stdout=PIPE, check=True, timeout=30)  # py3.6
+  #output = subprocess.run(cmd, stdout=PIPE, shell=True, timeout=30, text=True, check=True)
+except subprocess.TimeoutExpired:
+  print(f"Timeout for {args.netid}")
+except:
+  sys.exit(0)
+lines = output.stdout.decode("utf-8").split('\n')
+#lines = output.stdout.split('\n')
+if lines != [] and lines[-1] == "": lines = lines[:-1]
+
+total_jobs = len(lines)
+
+# counter update is used but might be better to initialize with list
+
+from collections import Counter
+c_state = Counter()
+c_workdir = Counter()
+c_time = Counter()
+c_hours = Counter()
+c_cores = Counter()
+c_gpus = Counter()
+
+pending = 0
+cpu_seconds = 0
+gpu_seconds = 0
+array_jobs = False
+partitions = set()
+jobs_completed = 0  # better than c_state["COMPLETED"]
+jobs_gpu = 0
+time_violation_count = 0
+
+host = gethostname()
+#if host.startswith("della-gpu"):
+term = Terminal()
+print(term.color_rgb(255, 0, 0) + host + term.normal)
+
+for line in lines:
+  jobid, state, nodes, cores, cputimeraw, elapsedraw, timelimitraw, \
+  partition, tres, workdir = line.split("|")
+
+  # array jobs
+  if "_" in jobid: array_jobs = True
+
+  # partition
+  partitions.add(partition)
+
+  # state
+  if "CANCELLED" in state: state = "CANCELLED"
+  c_state.update([state])
+
+  # working directory
+  if workdir.startswith(f"/tigress/{args.netid}"):
+    c_workdir.update([f"/tigress/{args.netid}"])
+  elif workdir.startswith("/projects"):
+    c_workdir.update(["/".join(workdir.split("/")[:2])])
+  elif workdir.startswith(f"/home/{args.netid}/ondemand"):
+    c_workdir.update([f"/home/{args.netid}/ondemand"])
+  elif workdir.startswith(f"/home/{args.netid}"):
+    c_workdir.update([f"/home/{args.netid} (not ondemand)"])
+  elif workdir.startswith(f"/scratch/gpfs/{args.netid}"):
+    c_workdir.update([f"/scratch/gpfs/{args.netid}"])
+  elif workdir.startswith("/scratch"):
+    c_workdir.update(["/scratch (not /scratch/gpfs)"])
+  elif workdir.startswith("/tmp"):
+    c_workdir.update(["/tmp"])
+  else:
+    c_workdir.update(["other"])
+
+  # time utilization
+  if state == "PENDING": pending += 1
+  if state == "COMPLETED":
+    jobs_completed += 1
+    timelimitraw = int(timelimitraw)
+    ratio = int(elapsedraw) / timelimitraw
+    if ratio > 1.0: ratio = 1.0
+    ratio = int(10 * ratio)
+    c_time.update([ratio])
+
+    # timelimitraw has units of minutes
+    if timelimitraw < 60:
+      c_hours.update([f"{timelimitraw} minutes"])
+    else:
+      c_hours.update([f"{int(timelimitraw / 60)} hours"])
+
+    if (timelimitraw > 62 and ratio <= 2):
+      time_violation_count += 1
+
+  # cpu-cores
+  c_cores.update([int(cores)])
+
+  # cpu-hours
+  # cputimeraw has units of cpu-seconds (it is equal to cores multiplied by elapsed)
+  # pending jobs have cputimeraw of 0
+  cpu_seconds += int(cputimeraw)
+
+  # gpu-hours
+  # elapsedraw has units of seconds
+  # billing=112,cpu=112,gres/gpu=16,mem=33600M,node=4
+  if "gres/gpu=" in tres:
+    jobs_gpu += 1
+    for part in tres.split(","):
+      if "gres/gpu=" in part:
+        num_gpus_per_job = int(part.split("=")[-1])
+    c_gpus.update([num_gpus_per_job])
+    gpu_seconds += int(elapsedraw) * num_gpus_per_job
+
+    # check for scatter
+    # partition, nodes, cpus-per-node, cluster
+
+print("\nUser:", args.netid)
+print("Since:", s)
+
+print("="*80)
+print(f"  STATE ({total_jobs} jobs)")
+print("="*80)
+if c_state:
+  for field, cnt in sorted(c_state.items(), key=lambda item: item[1], reverse=True):
+    print(field, cnt, str(int(100 * cnt / total_jobs))+"%")
+
+print()
+print("="*80)
+print(f"  WORKING DIRECTORY ({total_jobs} jobs)")
+print("="*80)
+if c_workdir:
+  for u, v in sorted(c_workdir.items(), key=lambda item: item[1], reverse=True):
+    print(u, v, str(int(100 * v / total_jobs))+"%")
+
+def align(rows):
+  return '\n'.join([''.join(['{:>12}'.format(x) for x in r]) for r in rows])
+
+print()
+print("="*80)
+print(f"  CPU-CORES ({total_jobs} jobs)")
+print("="*80)
+if c_cores:
+  first_pass = [["Cores", "Jobs    "]]
+  mx = [0] * len(first_pass)
+  for cores, cnt in sorted(c_cores.items()):
+    pct = f"{cnt} ({str(int(100 * cnt / total_jobs))}%) "
+    first_pass.append([str(cores) + " ", pct])
+  print(align(first_pass))
+
+print()
+print("="*80)
+print(f"  CPU-HOURS ({total_jobs} jobs)")
+print("="*80)
+cpu_hours = int(cpu_seconds / 3600.0)
+print(cpu_hours, int(cpu_seconds / 3600.0 / args.days), "per day")
+
+
+print()
+print("="*80)
+print(f"  GPU-HOURS ({jobs_gpu} jobs)")
+print("="*80)
+print("gpu-hours=", int(gpu_seconds / 3600.0))
+if c_gpus:
+  for u, v in sorted(c_gpus.items()):
+    print(u, v, str(int(100 * v / jobs_gpu))+"%")
+if jobs_gpu: print("Pct GPU jobs=", 100 * jobs_gpu / total_jobs)
+
+print()
+print("="*80)
+print(f"  TIME UTILIZATION OF COMPLETED JOBS ({jobs_completed} jobs)")
+print("="*80)
+if c_time:
+  for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
+    if i == 9:
+      print("90-100%", c_time[9] + c_time[10], str(int(100 * (c_time[9] + c_time[10])/jobs_completed))+"%")
+    else:
+      print(f"{10 * i}-{10 * (i + 1)}%", c_time[i], str(int(100 * c_time[i]/jobs_completed))+"%")
+if c_hours:
+  print("="*80)
+  for u, v in sorted(c_hours.items()):
+    print(f"{u}", v, str(int(100 * v / jobs_completed))+"%")
+if time_violation_count:
+  print(f"{args.netid} has {time_violation_count} jobs of {jobs_completed} with time limit > 62 minutes and a ratio of less than 0.2")
+
+print()
+print("Partitions:", ', '.join(sorted(partitions)))
+print(f"Job arrays: {array_jobs}")
