@@ -28,7 +28,7 @@ def start_date(days_back):
   return d.strftime("%Y-%m-%d")
 
 s = start_date(args.days)
-fmt = ("jobid%25,state%50,nnodes%6,ncpus%5,cputimeraw%25,elapsedraw%50,"
+fmt = ("jobid%25,state%50,nnodes%6,ncpus%5,reqmem%15,cputimeraw%25,elapsedraw%50,"
        "timelimitraw%50,partition%25,alloctres%75,workdir%50")
 cmd = f"sacct -X -P -n -S {s} -u {args.netid} -o {fmt}"
 try:
@@ -53,6 +53,8 @@ c_time = Counter()
 c_hours = Counter()
 c_cores = Counter()
 c_gpus = Counter()
+c_0_25 = Counter()
+c_0_100 = Counter()
 
 pending = 0
 cpu_seconds = 0
@@ -63,13 +65,26 @@ jobs_completed = 0  # better than c_state["COMPLETED"]
 jobs_gpu = 0
 time_violation_count = 0
 
+jobs_0_25 = 0
+ratio_sum_0_25 = 0
+ratio_min_0_25 = 1e9
+ratio_max_0_25 = 0
+ 
+elapsed_sum_0_25 = 0
+elapsed_min_0_25 = 1e9
+elapsed_max_0_25 = 0
+ 
+elapsed_25_50 = 0
+elapsed_50_75 = 0
+elapsed_75_100 = 0
+
 host = gethostname()
 #if host.startswith("della-gpu"):
 term = Terminal()
-print(term.color_rgb(255, 0, 0) + host + term.normal)
+#print(term.color_rgb(255, 0, 0) + host + term.normal)
 
 for line in lines:
-  jobid, state, nodes, cores, cputimeraw, elapsedraw, timelimitraw, \
+  jobid, state, nodes, cores, reqmem, cputimeraw, elapsedraw, timelimitraw, \
   partition, tres, workdir = line.split("|")
 
   # array jobs
@@ -101,26 +116,51 @@ for line in lines:
     c_workdir.update(["other"])
 
   # time utilization
-  if state == "PENDING": pending += 1
+  # elapsedraw has units of seconds
+  # timelimitraw has units of minutes
+  if state == "PENDING": pending += 1  # not used
   if state == "COMPLETED":
     jobs_completed += 1
-    timelimitraw = int(timelimitraw)
-    ratio = int(elapsedraw) / timelimitraw
-    if ratio > 1.0: ratio = 1.0
-    ratio = int(10 * ratio)
-    c_time.update([ratio])
-
-    # timelimitraw has units of minutes
-    if timelimitraw < 60:
-      c_hours.update([f"{timelimitraw} minutes"])
+    elapsedraw = int(elapsedraw)
+    timelimitraw_s = 60 * int(timelimitraw)
+    if timelimitraw_s == 0:
+      ratio = 0.0
     else:
-      c_hours.update([f"{int(timelimitraw / 60)} hours"])
+      ratio = elapsedraw / timelimitraw_s
+    if ratio > 1.0: ratio = 1.0
+    # partition job based on ratio
+    c_0_100.update([round(50 * ratio)])  # varies from 0 to 50
+    if ratio < 0.25:
+      jobs_0_25 += 1
+      elapsed_sum_0_25 += elapsedraw
+      if elapsedraw < elapsed_min_0_25: elapsed_min_0_25 = elapsedraw
+      if elapsedraw > elapsed_max_0_25: elapsed_max_0_25 = elapsedraw
+      ratio_sum_0_25 += ratio
+      if ratio < ratio_min_0_25: ratio_min_0_25 = ratio
+      if ratio > ratio_max_0_25: ratio_max_0_25 = ratio
+      c_0_25.update([round(200 * ratio)])  # varies from 0 to 50
+    elif ratio < 0.5:
+      elapsed_25_50 += elapsedraw
+    elif ratio < 0.75:
+      elapsed_50_75 += elapsedraw
+    else:
+      elapsed_75_100 += elapsedraw
+    
+    # TDO: remove
+    ratio_scaled = int(4 * ratio)
+    c_time.update([ratio_scaled])
 
-    if (timelimitraw > 62 and ratio <= 2):
+    c_hours.update([int(timelimitraw)])
+
+    if (timelimitraw_s > 60 * 62 and ratio <= 0.25):
       time_violation_count += 1
 
   # cpu-cores
-  c_cores.update([int(cores)])
+  if int(timelimitraw) < 60:
+    timelimit = timelimitraw + " m"
+  else:
+    timelimit = str(round(int(timelimitraw) / 60)) + " h"
+  c_cores.update([(int(nodes), int(cores), reqmem, timelimit)])
 
   # cpu-hours
   # cputimeraw has units of cpu-seconds (it is equal to cores multiplied by elapsed)
@@ -141,73 +181,134 @@ for line in lines:
     # check for scatter
     # partition, nodes, cpus-per-node, cluster
 
-print("\nUser:", args.netid)
-print("Since:", s)
+print("\n User:", args.netid)
+print(f"Since: {s} ({args.days} days ago)")
 
-print("="*80)
-print(f"  STATE ({total_jobs} jobs)")
 print("="*80)
 if c_state:
+  print("{: >15} {: >7} {: >7}".format(*["STATE", "PCT", "COUNT"]))
+  print("    ----------------------------")
   for field, cnt in sorted(c_state.items(), key=lambda item: item[1], reverse=True):
-    print(field, cnt, str(int(100 * cnt / total_jobs))+"%")
+    print("{: >15} {: >7} {: >7}".format(*[field, str(int(100 * cnt / total_jobs))+"%", cnt]))
+  print("    ----------------------------")
+  print("{: >15} {: >7} {: >7}".format(*["", "", total_jobs]))
 
-print()
-print("="*80)
-print(f"  WORKING DIRECTORY ({total_jobs} jobs)")
-print("="*80)
-if c_workdir:
-  for u, v in sorted(c_workdir.items(), key=lambda item: item[1], reverse=True):
-    print(u, v, str(int(100 * v / total_jobs))+"%")
+if total_jobs:
+  print()
+  print("="*80)
+  chars = max([len(key) for key in c_workdir.keys()])
+  if c_workdir:
+    fmt = "{: >" + str(chars + 1) + "} {: >7} {: >7}"
+    print(fmt.format(*["WORKING DIRECTORY", "PCT", "COUNT"]))
+    print(" --" + "-" * chars + "----------------")
+    for u, v in sorted(c_workdir.items(), key=lambda item: item[1], reverse=True):
+      print(fmt.format(*[u, str(round(100 * v / total_jobs))+"%", v]))
 
-def align(rows):
-  return '\n'.join([''.join(['{:>12}'.format(x) for x in r]) for r in rows])
-
-print()
-print("="*80)
-print(f"  CPU-CORES ({total_jobs} jobs)")
-print("="*80)
 if c_cores:
-  first_pass = [["Cores", "Jobs    "]]
-  mx = [0] * len(first_pass)
-  for cores, cnt in sorted(c_cores.items()):
-    pct = f"{cnt} ({str(int(100 * cnt / total_jobs))}%) "
-    first_pass.append([str(cores) + " ", pct])
-  print(align(first_pass))
+  print()
+  print("="*80)
+  print("{: >10} {: >6} {: >9} {: >6} {: >6} {: >6}".format(*["NODES", "CORES", "MEM", "TIME", "PCT", "JOBS"]))
+  print("    -----------------------------------------------")
+  for (nodes, cores, reqmem, time), cnt in sorted(c_cores.items(), key=lambda item: item[0][1], reverse=False):
+    print("{: >10} {: >6} {: >9} {: >6} {: >6} {: >6}".format(*[nodes, cores, reqmem.replace("000M", "G"), time, str(round(100 * cnt / total_jobs))+"%", cnt]))
 
 print()
-print("="*80)
-print(f"  CPU-HOURS ({total_jobs} jobs)")
-print("="*80)
-cpu_hours = int(cpu_seconds / 3600.0)
-print(cpu_hours, int(cpu_seconds / 3600.0 / args.days), "per day")
+cpu_hours = round(cpu_seconds / 3600.0)
+print(f" CPU-hours={cpu_hours} ({round(cpu_seconds / 3600.0 / args.days)} per day)")
 
 
-print()
-print("="*80)
-print(f"  GPU-HOURS ({jobs_gpu} jobs)")
-print("="*80)
-print("gpu-hours=", int(gpu_seconds / 3600.0))
-if c_gpus:
-  for u, v in sorted(c_gpus.items()):
-    print(u, v, str(int(100 * v / jobs_gpu))+"%")
-if jobs_gpu: print("Pct GPU jobs=", 100 * jobs_gpu / total_jobs)
+if jobs_gpu:
+  print()
+  print("="*80)
+  if c_gpus:
+    print("{: >10} {: >6} {: >6}".format(*["GPUs", "PCT", "JOBS"]))
+    print("  -----------------------------")
+    for u, v in sorted(c_gpus.items()):
+      print("{: >10} {: >6} {: >6}".format(*[u, str(int(100 * v / jobs_gpu))+"%", v]))
+  print()
+  print(f"GPU-hours={round(gpu_seconds / 3600.0)} ({round(gpu_seconds / 3600.0 / args.days)} per day)")
+  print(f" GPU jobs={str(round(100 * jobs_gpu / total_jobs))}%")
+
+def fmt_time(x):
+  # input is in units of seconds
+  if x < 60:
+    return f"{round(x)} s"
+  elif x < 3600:
+    return f"{round(x / 60)} m"
+  else:
+    return f"{round(x / 3600)} h"
 
 print()
 print("="*80)
 print(f"  TIME UTILIZATION OF COMPLETED JOBS ({jobs_completed} jobs)")
 print("="*80)
 if c_time:
-  for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
-    if i == 9:
-      print("90-100%", c_time[9] + c_time[10], str(int(100 * (c_time[9] + c_time[10])/jobs_completed))+"%")
+
+  s = ""
+  for i in range(51):
+    count = c_0_100[i]
+    frac = count / max(c_0_100.values())
+    if (frac == 0):
+      clr = term.on_color_rgb(0, 0, 0)
+    elif (frac < 0.25):
+      clr = term.on_blue
+    elif (frac < 0.5):
+      clr = term.on_cyan
+    elif (frac < 0.75):
+      clr = term.on_color_rgb(255, 165, 0)
     else:
-      print(f"{10 * i}-{10 * (i + 1)}%", c_time[i], str(int(100 * c_time[i]/jobs_completed))+"%")
+      clr = term.on_color_rgb(255, 0, 0)
+    s += clr + " " + term.normal
+  print(f"ratio: {s}")
+  print("      0                      0.5                          1")
+
+  for i in [0, 1, 2, 3]:
+    if i == 3:
+      print("75-100%", c_time[3] + c_time[4], str(int(100 * (c_time[3] + c_time[4])/jobs_completed))+"%")
+    else:
+      print(f"{25 * i}-{25 * (i + 1)}%", c_time[i], str(int(100 * c_time[i]/jobs_completed))+"%")
+if jobs_0_25 > 0:
+  print("-"*80)
+  print("             r < 0.25")
+  print("          min  avg  max")
+  print(f"elapsed: [{fmt_time(elapsed_min_0_25)}, {fmt_time(elapsed_sum_0_25 / jobs_0_25)}, {fmt_time(elapsed_max_0_25)}]")
+  print(f"  ratio: [{round(ratio_min_0_25, 1)}, {round(ratio_sum_0_25 / jobs_0_25, 1)}, {round(ratio_max_0_25, 1)}]")
+
+  s = ""
+  for i in range(51):
+    count = c_0_25[i]
+    frac = count / max(c_0_25.values())
+    if (frac == 0):
+      clr = term.on_color_rgb(0, 0, 0)
+    elif (frac < 0.25):
+      clr = term.on_blue
+    elif (frac < 0.5):
+      clr = term.on_cyan
+    elif (frac < 0.75):
+      clr = term.on_color_rgb(255, 165, 0)
+    else:
+      clr = term.on_color_rgb(255, 0, 0)
+    s += clr + " " + term.normal
+  print(f"ratio: {s}")
+  print("      0                       0.125                      0.25")
+
+
 if c_hours:
-  print("="*80)
-  for u, v in sorted(c_hours.items()):
-    print(f"{u}", v, str(int(100 * v / jobs_completed))+"%")
+  print("-"*80)
+  print("{: >10} {: >6} {: >6}".format(*["TIME", "PCT", "COUNT"]))
+  print("  -----------------------------")
+  for minutes, cnt in sorted(c_hours.items()):
+    if minutes < 60:
+      timelimit = f"{minutes} m"
+    else:
+      timelimit = f"{round(minutes / 60)} h"
+    pct = str(int(100 * cnt / jobs_completed)) + "%"
+    print("{: >10} {: >6} {: >6}".format(*[timelimit, pct, cnt]))
+  print("  -----------------------------")
+  print("{: >10} {: >6} {: >6}".format(*["", "", jobs_completed]))
+    
 if time_violation_count:
-  print(f"{args.netid} has {time_violation_count} jobs of {jobs_completed} with time limit > 62 minutes and a ratio of less than 0.2")
+  print(f"{time_violation_count} of {jobs_completed} completed jobs with time limit > 62 minutes and r < 0.25")
 
 print()
 print("Partitions:", ', '.join(sorted(partitions)))
