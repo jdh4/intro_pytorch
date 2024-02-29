@@ -12,8 +12,8 @@ Click on a notebook above. After the notebook loads, click on the "Open in Colab
 
 ### Getting Help
 
-If you encounter any difficulties with the material in this guide then please attend a <a href="https://researchcomputing.princeton.edu/education/help-sessions">help session</a>.
+If you encounter any difficulties with the material in this guide then please attend a <a href="https://researchcomputing.princeton.edu/education/help-sessions">help session</a> or submit a [support ticket](https://researchcomputing.princeton.edu/support/submit-ticket).
 
 ### Authorship
 
-This guide was created by [Christina Peters](https://catalog.saintmarys.edu/faculty/) with contributions from Julian Gold and Jonathan Halverson.
+This workshop was created by David Turner, Jonathan Halverson and members of Princeton Research Computing.
