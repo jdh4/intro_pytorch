@@ -10,6 +10,10 @@ For more PICSciE/RC workshops on machine learning see the [Spring 2024 line-up](
 
 Click on a notebook above. After the notebook loads, click on the "Open in Colab" button. Run the cells. If you encounter the message "Warning: This notebook was not authored by Google" then choose "Run anyway".
 
+### Resources
+
+xx
+
 ### Getting Help
 
 If you encounter any difficulties with the material in this guide then please attend a <a href="https://researchcomputing.princeton.edu/education/help-sessions">help session</a> or submit a [support ticket](https://researchcomputing.princeton.edu/support/submit-ticket).
