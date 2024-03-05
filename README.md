@@ -12,10 +12,10 @@ Click on a notebook above. After the notebook loads, click on the "Open in Colab
 
 ### Learning Resources
 
-[PyTorch webstie](https://pytorch.org)
-[PyTorch Examples on GitHub](https://github.com/pytorch/examples)
-[PyTorch on the Princeton Research Computing Clusters](https://researchcomputing.princeton.edu/support/knowledge-base/pytorch)
-[Multi-GPU Training with PyTorch on the Princeton Research Computing Clusters](https://github.com/PrincetonUniversity/multi_gpu_training)
+[PyTorch webstie](https://pytorch.org)  
+[PyTorch Examples on GitHub](https://github.com/pytorch/examples)  
+[PyTorch on the Princeton Research Computing Clusters](https://researchcomputing.princeton.edu/support/knowledge-base/pytorch)  
+[Multi-GPU Training with PyTorch on the Princeton Research Computing Clusters](https://github.com/PrincetonUniversity/multi_gpu_training)  
 
 ### Getting Help
 
