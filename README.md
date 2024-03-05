@@ -10,9 +10,12 @@ For more PICSciE/RC workshops on machine learning see the [Spring 2024 line-up](
 
 Click on a notebook above. After the notebook loads, click on the "Open in Colab" button. Run the cells. If you encounter the message "Warning: This notebook was not authored by Google" then choose "Run anyway".
 
-### Resources
+### Learning Resources
 
-xx
+[PyTorch webstie](https://pytorch.org)
+[PyTorch Examples on GitHub](https://github.com/pytorch/examples)
+[PyTorch on the Princeton Research Computing Clusters](https://researchcomputing.princeton.edu/support/knowledge-base/pytorch)
+[Multi-GPU Training with PyTorch on the Princeton Research Computing Clusters](https://github.com/PrincetonUniversity/multi_gpu_training)
 
 ### Getting Help
 
