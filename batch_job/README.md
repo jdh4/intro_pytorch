@@ -1,4 +1,4 @@
-# Example of Running PyTorch on Adroit
+# Example of Running a PyTorch Job on Adroit
 
 ```
 $ ssh <YourNetID>@adroit.princeton.edu
