@@ -14,7 +14,7 @@ $ conda activate /home/jdh4/.conda/envs/torch-env
 $ python download_mnist.py
 ```
 
-In this example, a pre-installed Conda environment is being.
+In this example, a pre-installed Conda environment by user `jdh4` is being used. After the workshop you can [create your own environment](https://researchcomputing.princeton.edu/support/knowledge-base/pytorch) and use that.
 
 Submit the job to the Slurm scheduler:
 
