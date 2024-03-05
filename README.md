@@ -13,7 +13,7 @@ Click on a notebook above. After the notebook loads, click on the "Open in Colab
 ### Learning Resources
 
 [PyTorch Webstie](https://pytorch.org)  
-[PyTorch Tutorials](https://pytorch.org/tutorials/)
+[PyTorch Tutorials](https://pytorch.org/tutorials/)  
 [PyTorch Examples on GitHub](https://github.com/pytorch/examples)  
 [PyTorch on the Princeton Research Computing Clusters](https://researchcomputing.princeton.edu/support/knowledge-base/pytorch)  
 [Multi-GPU Training with PyTorch on the Princeton Research Computing Clusters](https://github.com/PrincetonUniversity/multi_gpu_training)  
