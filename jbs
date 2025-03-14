@@ -8,7 +8,7 @@ import argparse
 import subprocess
 from subprocess import PIPE
 from socket import gethostname
-from blessed import Terminal
+from blessed import what
 
 psr = argparse.ArgumentParser()
 psr.add_argument('-d', type=int, action='store', dest='days', default=30,
